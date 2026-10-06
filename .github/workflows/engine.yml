@@ -1,0 +1,55 @@
+name: Spatial Audio Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      audio_url:
+        description: 'Temporary Input Audio URL'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  process-audio:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Status to Processing
+        shell: bash
+        run: |
+          echo '{"status": "processing"}' > status.json
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git pull origin main --rebase
+          git add status.json
+          git commit -m "UI: Processing started" || true
+          git push
+
+      - name: Setup Environment & Download Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Fetch Cavernize Engine & Input Audio
+        run: |
+          pip install gdown
+          gdown "https://drive.google.com/uc?id=1KrncS1Fareqj_B_9BG5XOkEaoL3l0s8H" -O Cavernize.exe
+          curl -L -o input.m4a "${{ github.event.inputs.audio_url }}"
+
+      - name: Execute 9.1.6 Spatial Extraction (32-bit)
+        run: .\Cavernize.exe -i input.m4a -o Render_Output.wav -layout 9.1.6 -b 32
+
+      - name: Upload Massive WAV & Generate Link
+        shell: bash
+        run: |
+          # Sube el archivo renderizado a un servidor de alta capacidad y velocidad
+          DIRECT_URL=$(curl --upload-file Render_Output.wav https://transfer.sh/Atmos_Render_916_32bit.wav)
+          
+          echo '{"status": "ready", "link": "'$DIRECT_URL'"}' > status.json
+          git pull origin main --rebase
+          git add status.json
+          git commit -m "UI: Process complete" || true
+          git push
