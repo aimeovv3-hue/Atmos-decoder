@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial Audio Engine 9.1.6</title>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 550px; background: #161b22; padding: 35px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        h1 { text-align: center; font-size: 26px; margin-top: 0; margin-bottom: 5px; color: #58a6ff; }
+        p.sub { text-align: center; color: #8b949e; font-size: 14px; margin-bottom: 30px; }
+        .config-section { background: #0d1117; padding: 20px; border-radius: 8px; border: 1px solid #30363d; margin-bottom: 25px; }
+        .config-section label { font-size: 13px; font-weight: 600; color: #c9d1d9; display: block; margin-bottom: 8px; }
+        input[type="text"], input[type="password"] { width: 100%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 15px; border: 1px solid #30363d; border-radius: 6px; background: #010409; color: #c9d1d9; outline: none; }
+        input[type="text"]:focus, input[type="password"]:focus { border-color: #58a6ff; }
+        .drop-zone { border: 2px dashed #238636; background: rgba(35, 134, 54, 0.05); border-radius: 10px; padding: 40px 20px; text-align: center; cursor: pointer; transition: 0.2s; margin-bottom: 20px; }
+        .drop-zone:hover { background: rgba(35, 134, 54, 0.15); border-color: #2ea043; }
+        .drop-zone p { margin: 0; color: #3fb950; font-weight: 600; font-size: 16px; }
+        #status { margin-top: 20px; text-align: center; font-weight: 600; color: #58a6ff; font-size: 15px; min-height: 20px; }
+        #downloadBtn { display: none; background: #238636; color: white; font-weight: 600; border: none; padding: 15px; width: 100%; border-radius: 6px; cursor: pointer; font-size: 16px; margin-top: 20px; text-align: center; text-decoration: none; box-sizing: border-box; transition: 0.2s; }
+        #downloadBtn:hover { background: #2ea043; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Spatial Audio Engine</h1>
+    <p class="sub">Direct 9.1.6 Atmos Extraction via GitHub Actions</p>
+
+    <div class="config-section">
+        <label>GitHub Username</label>
+        <input type="text" id="user" placeholder="e.g., andres-dev">
+        <label>Repository Name</label>
+        <input type="text" id="repo" placeholder="e.g., cavernize-server">
+        <label>Personal Access Token (PAT)</label>
+        <input type="password" id="token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+    </div>
+
+    <div class="drop-zone" onclick="document.getElementById('fileInput').click()">
+        <p>Click to Upload Audio (.m4a / .mp4)</p>
+        <input type="file" id="fileInput" style="display: none;" accept="audio/*,video/*" onchange="handleFile(event)">
+    </div>
+
+    <div id="status">Ready. Awaiting audio file.</div>
+    <a id="downloadBtn" href="#" target="_blank">Download Rendered 32-bit WAV</a>
+</div>
+
+<script>
+    window.onload = () => {
+        document.getElementById('user').value = localStorage.getItem('gh_user') || '';
+        document.getElementById('repo').value = localStorage.getItem('gh_repo') || '';
+        document.getElementById('token').value = localStorage.getItem('gh_token') || '';
+    };
+
+    function setStatus(msg) { document.getElementById('status').innerText = msg; }
+
+    async function handleFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const user = document.getElementById('user').value.trim();
+        const repo = document.getElementById('repo').value.trim();
+        const token = document.getElementById('token').value.trim();
+
+        if (!user || !repo || !token) {
+            alert("Please fill in your GitHub credentials first.");
+            return;
+        }
+
+        localStorage.setItem('gh_user', user);
+        localStorage.setItem('gh_repo', repo);
+        localStorage.setItem('gh_token', token);
+
+        document.getElementById('downloadBtn').style.display = 'none';
+        setStatus("1/4: Uploading source file to temp bridge...");
+
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            let uploadRes = await fetch('https://tmpfiles.org/api/v1/upload', { method: 'POST', body: fd });
+            let uploadData = await uploadRes.json();
+            let rawUrl = uploadData.data.url;
+            let tempUrl = rawUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+
+            setStatus("2/4: Awakening Windows Engine on GitHub Actions...");
+            await fetch(`https://api.github.com/repos/${user}/${repo}/actions/workflows/engine.yml/dispatches`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' },
+                body: JSON.stringify({ ref: 'main', inputs: { audio_url: tempUrl } })
+            });
+
+            setStatus("3/4: Engine running (Extraction takes ~2 mins). Please wait...");
+            
+            let interval = setInterval(async () => {
+                try {
+                    let cacheBuster = new Date().getTime();
+                    let res = await fetch(`https://raw.githubusercontent.com/${user}/${repo}/main/status.json?t=${cacheBuster}`);
+                    let statusData = await res.json();
+                    
+                    if(statusData.status === "ready") {
+                        clearInterval(interval);
+                        setStatus("4/4: Process Complete! Audio is ready.");
+                        let btn = document.getElementById('downloadBtn');
+                        btn.style.display = 'block';
+                        btn.href = statusData.link;
+                    }
+                } catch(e) {} 
+            }, 5000);
+
+        } catch (error) {
+            setStatus("Error: " + error.message);
+        }
+    }
+</script>
+</body>
+</html>
